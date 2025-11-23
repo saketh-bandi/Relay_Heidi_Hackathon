@@ -3,11 +3,11 @@
 
 from fpdf import FPDF
 from datetime import datetime
-import os
+import base64
 import re
 
 def sanitize_text_for_pdf(text):
-    """Sanitize text for PDF generation by removing problematic characters"""
+    """Strict text sanitization for PDF generation with explicit latin-1 encoding"""
     if not text:
         return ""
     
@@ -22,7 +22,10 @@ def sanitize_text_for_pdf(text):
         '\u2014': '-', '\u2013': '-',
         # Other common problematic characters
         '\u2022': '-', '\u2026': '...', '\u00a0': ' ',
-        # Remove emojis and other high Unicode characters
+        # Currency symbols
+        '\u20ac': 'EUR', '\u00a3': 'GBP', '\u00a5': 'YEN',
+        # Mathematical symbols
+        '\u00b1': '+/-', '\u00d7': 'x', '\u00f7': '/',
     }
     
     for old, new in replacements.items():
@@ -31,14 +34,15 @@ def sanitize_text_for_pdf(text):
     # Remove any remaining non-ASCII characters using regex
     text = re.sub(r'[^\x00-\x7F]+', '', text)
     
-    # Encode to latin-1 and handle errors by replacing problematic characters
+    # EXPLICIT LATIN-1 ENCODING - This is critical for PDF integrity
     try:
-        # First try to encode/decode to catch issues
-        text.encode('latin-1')
+        # Force encode/decode to latin-1 to catch any problematic characters
+        text = text.encode('latin-1', errors='replace').decode('latin-1')
         return text
-    except UnicodeEncodeError:
-        # Replace any remaining problematic characters
-        return text.encode('latin-1', errors='replace').decode('latin-1')
+    except Exception as e:
+        print(f"Warning: Text sanitization error: {e}")
+        # Ultimate fallback - only ASCII characters
+        return ''.join(char for char in text if ord(char) < 128)
 
 class MedicalReferralFormPDF(FPDF):
     """Professional Medical Referral Form PDF Generator - Complete Form Layout"""
@@ -208,15 +212,15 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
                        procedure_codes, diagnosis_codes, specialty, 
                        patient_dob=None, patient_age=None, patient_sex=None, patient_complaint=None):
     """
-    Generate a professional medical referral form PDF with comprehensive patient information
+    Generate a professional medical referral form PDF and return binary content
+    CRITICAL: Returns binary PDF data instead of saving to disk for file integrity
     """
     # AI-generated code section begins - GitHub Copilot assisted with robust PDF generation
     
-    # Create simple timestamp-based filename to avoid filesystem issues
+    # Create timestamp for reference (not used for filename anymore)
     timestamp = datetime.now().strftime('%H%M%S')
-    filename = f"medical_referral_{timestamp}.pdf"
     
-    print(f"📄 Generating Medical Referral Form: {filename}")
+    print(f"📄 Generating Medical Referral Form (Binary Output): referral_{timestamp}")
     
     # Create PDF instance with error handling
     try:
@@ -227,7 +231,7 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
         pdf.set_text_color(0, 0, 0)
     except Exception as e:
         print(f"❌ PDF initialization error: {e}")
-        return None
+        return None, None
     
     # FORM GENERATION with error handling
     try:
@@ -329,36 +333,40 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
     except Exception as e:
         print(f"❌ Error in signature section: {e}")
     
-    # Save PDF with comprehensive error handling
+    # Generate PDF as binary data - CRITICAL for file integrity
     try:
-        print(f"📄 Attempting to save PDF: {filename}")
-        pdf.output(filename)
+        print(f"📄 Generating PDF binary content...")
         
-        # Verify file was created successfully
-        if os.path.exists(filename):
-            file_size = os.path.getsize(filename)
-            if file_size > 0:
-                print(f"✅ PDF Generated Successfully: {filename} ({file_size} bytes)")
-                return filename
-            else:
-                print(f"❌ PDF file created but is empty: {filename}")
-                return None
+        # Use dest='S' to return PDF as binary data instead of saving to disk
+        pdf_binary = pdf.output(dest='S')
+        
+        # Handle different FPDF versions - newer versions return bytes directly
+        if isinstance(pdf_binary, str):
+            pdf_binary = pdf_binary.encode('latin-1')
+        # If it's already bytes or bytearray, convert to bytes
+        elif isinstance(pdf_binary, bytearray):
+            pdf_binary = bytes(pdf_binary)
+        
+        if pdf_binary and len(pdf_binary) > 1000:  # Reasonable size check
+            print(f"✅ PDF Generated Successfully: {len(pdf_binary)} bytes (binary)")
+            
+            # Create filename for reference
+            filename = f"medical_referral_{timestamp}.pdf"
+            
+            # Return both binary data and filename
+            return pdf_binary, filename
         else:
-            print(f"❌ PDF file was not created: {filename}")
-            return None
+            print(f"❌ PDF generation failed - binary data too small or empty")
+            return None, None
             
     except UnicodeEncodeError as e:
         print(f"❌ PDF Unicode Encoding Error: {e}")
-        print("   This is likely due to special characters in the text content")
-        return None
-    except PermissionError as e:
-        print(f"❌ PDF Permission Error: {e}")
-        print("   Check if the file is open in another application")
-        return None
+        print("   Text sanitization failed - check input data")
+        return None, None
     except Exception as e:
         print(f"❌ PDF Generation Error: {e}")
         print(f"   Error type: {type(e).__name__}")
-        return None
+        return None, None
     
     # AI-generated code section ends
 
@@ -388,7 +396,7 @@ def test_pdf_generation():
         {'code': 'I20.9', 'description': 'Angina pectoris, unspecified'}
     ]
     
-    filename = create_referral_pdf(
+    pdf_binary, filename = create_referral_pdf(
         patient_name="John Smith",
         doctor=sample_doctor,
         insurance_result=sample_insurance,
@@ -402,14 +410,20 @@ def test_pdf_generation():
         patient_complaint="Chest pain with exertion, shortness of breath, palpitations"
     )
     
-    return filename
+    # Save binary data to file for testing
+    if pdf_binary and filename:
+        with open(filename, 'wb') as f:
+            f.write(pdf_binary)
+        print(f"💾 Test PDF saved to disk: {filename}")
+    
+    return pdf_binary, filename
     # AI-generated code section ends
 
 if __name__ == "__main__":
     print("🧪 Testing PDF Generation...")
-    test_filename = test_pdf_generation()
-    if test_filename:
-        print(f"✅ Test PDF created: {test_filename}")
+    pdf_binary, test_filename = test_pdf_generation()
+    if pdf_binary and test_filename:
+        print(f"✅ Test PDF created: {test_filename} ({len(pdf_binary)} bytes)")
     else:
         print("❌ PDF generation failed")
 

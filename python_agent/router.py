@@ -1,6 +1,10 @@
 import requests
 import re
 import json
+import base64
+import os
+import glob
+import subprocess
 from datetime import datetime
 from mock_db import SPECIALIST_REGISTRY, INSURANCE_PLANS, PROCEDURE_CODES, DIAGNOSIS_CODES
 from pdf_generator import create_referral_pdf
@@ -65,8 +69,8 @@ def analyze_transcript(transcript_text):
     print(f"🔬 Procedure Codes Retrieved: {len(procedure_codes) if procedure_codes else 0} codes")
     print(f"🧬 Diagnosis Codes Retrieved: {len(diagnosis_codes) if diagnosis_codes else 0} codes")
     
-    # 8. GENERATE COMPREHENSIVE PDF REFERRAL FORM
-    pdf_filename = create_referral_pdf(
+    # 8. GENERATE COMPREHENSIVE PDF REFERRAL FORM (BINARY OUTPUT)
+    pdf_binary, pdf_filename = create_referral_pdf(
         patient_name=patient_name,
         doctor=doctor,
         insurance_result=insurance_result,
@@ -79,6 +83,12 @@ def analyze_transcript(transcript_text):
         patient_sex=patient_sex,
         patient_complaint=patient_complaint
     )
+    
+    # Check if PDF generation was successful
+    if not pdf_binary or not pdf_filename:
+        print("❌ PDF generation failed - continuing without PDF attachment")
+        pdf_binary = None
+        pdf_filename = None
     
     # 9. GENERATE PROFESSIONAL HTML EMAIL
     email_html = generate_referral_email_html(
@@ -96,16 +106,52 @@ def analyze_transcript(transcript_text):
         patient_complaint=patient_complaint
     )
     
-    # 9. PREPARE SIMPLIFIED PAYLOAD - Smart Backend, Dumb Pipe Architecture
-    n8n_payload = {
-        "email": "inumakisalt123@gmail.com",
-        "subject": f"Urgent Referral: {patient_name} - {detected_specialty.title()} Consultation",
-        "email_html": email_html,
-        "pdf_filename": pdf_filename
-    }
-
-    # 10. SEND TO N8N WEBHOOK  
-    return send_to_n8n(n8n_payload)
+    # 10. SAVE PDF TO DISK TEMPORARILY FOR MULTIPART FILE UPLOAD
+    temp_pdf_path = None
+    permanent_pdf_path = None
+    if pdf_binary and pdf_filename:
+        try:
+            temp_pdf_path = pdf_filename
+            # Also save a permanent copy for viewing
+            permanent_pdf_path = f"preview_{pdf_filename}"
+            
+            with open(temp_pdf_path, 'wb') as f:
+                f.write(pdf_binary)
+            with open(permanent_pdf_path, 'wb') as f:
+                f.write(pdf_binary)
+                
+            print(f"💾 Temporary PDF saved: {temp_pdf_path} ({len(pdf_binary)} bytes)")
+            print(f"🔍 Preview PDF saved: {permanent_pdf_path}")
+            
+            # Auto-open the PDF for preview (macOS) - ALWAYS ENABLED
+            try:
+                subprocess.run(['open', permanent_pdf_path], check=False)
+                print(f"👀 PDF automatically opened: {permanent_pdf_path}")
+                print(f"📄 Preview should appear in your default PDF viewer")
+            except Exception as e:
+                print(f"⚠️ Could not auto-open PDF: {e}")
+                print(f"💡 Manually open with: open {permanent_pdf_path}")
+                # Try alternative methods
+                try:
+                    import webbrowser
+                    webbrowser.open(f'file://{os.path.abspath(permanent_pdf_path)}')
+                    print(f"🌐 Opened PDF in browser as fallback")
+                except Exception as e2:
+                    print(f"⚠️ Browser fallback failed: {e2}")
+                
+        except Exception as e:
+            print(f"❌ Failed to save temporary PDF: {e}")
+            temp_pdf_path = None
+    
+    # 11. SEND TO N8N WEBHOOK WITH MULTIPART FILE UPLOAD
+    return send_to_n8n_with_file(
+        email="inumakisalt123@gmail.com",
+        subject=f"Urgent Referral: {patient_name} - {detected_specialty.title()} Consultation",
+        email_html=email_html,
+        pdf_file_path=temp_pdf_path,
+        pdf_filename=pdf_filename,
+        patient_name=patient_name  # Pass patient name explicitly
+    )
 
 def extract_patient_name(text):
     """Extract patient name from transcript using regex patterns"""
@@ -435,26 +481,74 @@ def generate_referral_email_html(patient_name, doctor, insurance_result, clinica
     
     # AI-generated code section ends
 
-def send_to_n8n(payload):
-    """Send the simplified email payload to n8n webhook - Dumb Pipe Implementation"""
-    print(f"🚀 Sending referral email to n8n workflow...")
-    print(f"📧 Email Payload Summary:")
-    print(f"   Recipient: {payload['email']}")
-    print(f"   Subject: {payload['subject']}")
-    print(f"   HTML Length: {len(payload['email_html'])} characters")
-    print(f"   PDF Attachment: {payload.get('pdf_filename', 'None')}")
-    print(f"   Email Type: Professional Medical Referral with PDF")
+def send_to_n8n_with_file(email, subject, email_html, pdf_file_path=None, pdf_filename=None, patient_name=None):
+    """Send email with PDF file attachment using multipart/form-data - CRITICAL FIX"""
+    # AI-generated code section begins - GitHub Copilot assisted with multipart file upload fix
+    
+    print(f"🚀 Sending referral email to n8n workflow with file attachment...")
+    print(f"📧 Email Details:")
+    print(f"   Recipient: {email}")
+    print(f"   Subject: {subject}")
+    print(f"   HTML Length: {len(email_html)} characters")
+    print(f"   PDF File: {pdf_file_path}")
     
     try:
-        response = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
+        # Prepare the data payload (non-file fields) - n8n compatible format
+        data = {
+            "email": email,
+            "subject": subject,
+            "email_html": email_html,
+            "patient_name": patient_name or "Unknown Patient",
+            "content_type": "medical_referral"
+        }
+        
+        files = {}
+        
+        # Add PDF file if available
+        if pdf_file_path and pdf_filename:
+            try:
+                # Open the PDF file for multipart upload
+                with open(pdf_file_path, 'rb') as pdf_file:
+                    # Read file content
+                    pdf_content = pdf_file.read()
+                    
+                # Add file to files dict (n8n expects 'file' parameter)
+                files['file'] = (pdf_filename, pdf_content, 'application/pdf')
+                print(f"📎 PDF file attached: {pdf_filename} ({len(pdf_content)} bytes)")
+                
+            except Exception as e:
+                print(f"❌ Failed to read PDF file: {e}")
+                files = {}
+        
+        # Send multipart request with both data and files
+        print(f"🌐 Sending POST request to n8n...")
+        print(f"📤 Data fields being sent: {list(data.keys())}")
+        print(f"📎 File fields being sent: {list(files.keys())}")
+        
+        response = requests.post(
+            N8N_WEBHOOK_URL, 
+            data=data,  # Form data fields (accessible as $json.body.email, $json.body.subject, etc.)
+            files=files,  # File attachment (accessible as $binary.file)
+            timeout=15
+        )
+        
+        # Clean up temporary file
+        if pdf_file_path:
+            try:
+                os.remove(pdf_file_path)
+                print(f"🗑️ Temporary PDF file deleted: {pdf_file_path}")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not delete temporary file: {e}")
+        
         if response.status_code == 200:
-            print("✅ SUCCESS: Referral processed and sent to n8n!")
+            print("✅ SUCCESS: Referral email with PDF attachment sent to n8n!")
             print("📧 Email notification should arrive shortly")
             return True
         else:
             print(f"❌ n8n Webhook Error: {response.status_code}")
-            print(f"Response: {response.text}")
+            print(f"Response: {response.text[:500]}")
             return False
+            
     except requests.exceptions.Timeout:
         print("❌ Timeout: n8n webhook took too long to respond")
         return False
@@ -464,30 +558,13 @@ def send_to_n8n(payload):
     except Exception as e:
         print(f"❌ Unexpected Error: {e}")
         return False
+    
+    # AI-generated code section ends
 # AI-generated code section ends
 
 # ==========================================
-# TEST RUNNER - Single Test Mode (No Email Spam)
+# TEST RUNNER - Single Test Mode (No Email Spam) - REMOVED
 # ==========================================
-if __name__ == "__main__":
-    print("🧪 Testing Healthcare Transcript Analysis System with PDF Generation")
-    print("=" * 70)
-    print("ℹ️  Running SINGLE test to avoid email spam")
-    
-    # Single test: Complete referral with clinical context
-    print("\n--- SINGLE TEST: Complete Medical Referral with PDF ---")
-    result = analyze_transcript("Patient is John Smith presenting with chest pain and shortness of breath. I am going to refer him to Cardiology for cardiac evaluation.")
-    
-    if result:
-        print("\n✅ SUCCESS: System working correctly!")
-        print("📧 One professional referral email sent to n8n")
-        print("📄 PDF referral letter generated locally")
-    else:
-        print("\n❌ FAILED: System detected no medical intent")
-    
-    print("\n🏁 Single test complete - No email spam!")
-    print("\n💡 To test other scenarios, modify the transcript text above")
-    print("   Examples:")
     print("   - 'Sarah needs dermatology for her rash'")
     print("   - 'Patient has headaches, refer to neurology'") 
     print("   - 'The weather is nice today' (should fail)")
@@ -619,3 +696,123 @@ def extract_patient_complaint(text):
     return None
 
 # AI-generated code section ends
+
+# AI-generated code section ends
+
+# ==========================================
+# TEST RUNNER - Single Test Mode (No Email Spam) - REMOVED
+# ==========================================
+    print("   - 'Sarah needs dermatology for her rash'")
+    print("   - 'Patient has headaches, refer to neurology'") 
+    print("   - 'The weather is nice today' (should fail)")
+    
+# AI-generated code section ends
+
+# AI-generated code section begins - GitHub Copilot assisted with PDF preview functionality
+
+def test_with_pdf_preview():
+    """Interactive test that shows the PDF and lets user customize the test"""
+    print("🧪 INTERACTIVE PDF PREVIEW TEST")
+    print("=" * 50)
+    
+    # Ask user for custom input or use default
+    print("\n📝 Choose your test:")
+    print("1. Default cardiology referral (John Smith)")
+    print("2. Custom transcript input")
+    
+    choice = input("Enter choice (1 or 2, default=1): ").strip() or "1"
+    
+    if choice == "2":
+        print("\n📋 Enter your medical transcript:")
+        custom_transcript = input("Transcript: ").strip()
+        if not custom_transcript:
+            print("⚠️ Empty transcript, using default...")
+            custom_transcript = None
+    else:
+        custom_transcript = None
+    
+    # Use default or custom transcript
+    if custom_transcript:
+        test_transcript = custom_transcript
+    else:
+        test_transcript = """
+        I need to refer John Smith to cardiology. He is a 48 year old male, date of birth is 03/15/1975. 
+        He has been complaining of chest pain with exertion and shortness of breath. 
+        The patient reports these episodes occur during physical activity and resolve with rest. 
+        He also mentions palpitations and some dizziness. 
+        No radiation of pain to arms or jaw, but increased frequency over the past 2 weeks.
+        """
+    
+    print(f"\n🚀 Processing transcript...")
+    result = analyze_transcript(test_transcript)
+    
+    print(f"\n{'✅ SUCCESS' if result else '❌ FAILED'}")
+    
+    # Show available PDFs
+    preview_pdfs = glob.glob("preview_medical_referral_*.pdf")
+    if preview_pdfs:
+        latest_pdf = max(preview_pdfs, key=os.path.getctime)
+        print(f"📄 Latest PDF: {latest_pdf}")
+        
+        # Ask if user wants to open it again
+        reopen = input("\n🔄 Open PDF again? (y/n, default=n): ").strip().lower()
+        if reopen == 'y':
+            try:
+                subprocess.run(['open', latest_pdf], check=False)
+                print(f"👀 PDF reopened: {latest_pdf}")
+            except Exception as e:
+                print(f"❌ Could not reopen PDF: {e}")
+    
+    return result
+
+# AI-generated code section ends
+
+# ==========================================
+# QUICK CUSTOM TEST FUNCTION
+# ==========================================
+
+def quick_custom_test(custom_transcript):
+    """Run a quick test with custom transcript and auto PDF preview"""
+    print("🚀 PROCESSING CUSTOM TRANSCRIPT")
+    print("=" * 50)
+    print(f"📝 Transcript: {custom_transcript[:100]}...")
+    
+    result = analyze_transcript(custom_transcript)
+    
+    print("\n" + "=" * 50)
+    print(f"🎯 RESULT: {'✅ SUCCESS' if result else '❌ FAILED'}")
+    print("📧 Email sent! 📄 PDF opened!")
+    
+    return result
+
+# ==========================================
+# MAIN EXECUTION - Run router.py directly
+# ==========================================
+
+if __name__ == "__main__":
+    print("🚀 MEDICAL REFERRAL SYSTEM - AUTO PDF PREVIEW")
+    print("=" * 50)
+    
+    # Default behavior: Auto PDF preview + Email
+    sample_transcript = """
+    I need to refer John Smith to cardiology. He is a 48 year old male, date of birth is 03/15/1975. 
+    He has been complaining of chest pain with exertion and shortness of breath. 
+    The patient reports these episodes occur during physical activity and resolve with rest. 
+    He also mentions palpitations and some dizziness. 
+    No radiation of pain to arms or jaw, but increased frequency over the past 2 weeks.
+    """
+    
+    print("📝 Processing medical referral with auto PDF preview...")
+    print(f"📋 Patient: John Smith (Cardiology)")
+    
+    result = analyze_transcript(sample_transcript)
+    
+    print("\n" + "=" * 50)
+    print(f"🎯 EXECUTION RESULT: {'✅ SUCCESS' if result else '❌ FAILED'}")
+    print("📧 Email sent with PDF attachment!")
+    print("📄 PDF automatically opened for preview!")
+    print("🎉 System ready for next referral!")
+
+# AI-generated code section ends
+
+
