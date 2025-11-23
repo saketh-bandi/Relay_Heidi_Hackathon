@@ -22,22 +22,11 @@ def analyze_transcript(transcript_text):
     patient_name = extract_patient_name(transcript_text)
     print(f"👤 Patient Identified: {patient_name}")
     
-    # 2. EXTRACT NEW PATIENT FIELDS
-    patient_dob = extract_patient_dob(transcript_text)
-    patient_age = extract_patient_age(transcript_text)
-    patient_sex = extract_patient_sex(transcript_text)
-    patient_complaint = extract_patient_complaint(transcript_text)
-    
-    print(f"📅 Patient DOB: {patient_dob or 'Not provided'}")
-    print(f"🎂 Patient Age: {patient_age or 'Not provided'}")
-    print(f"👫 Patient Sex: {patient_sex or 'Not provided'}")
-    print(f"🏥 Chief Complaint: {patient_complaint or 'Not specified'}")
-    
-    # 3. EXTRACT CLINICAL CONTEXT for referral reasoning
+    # 2. EXTRACT CLINICAL CONTEXT for referral reasoning
     clinical_context = extract_clinical_context(transcript_text)
     print(f"📋 Clinical Context: {clinical_context}")
     
-    # 4. DETECT SPECIALTY dynamically from registry keys
+    # 3. DETECT SPECIALTY dynamically from registry keys
     detected_specialty = detect_specialty(transcript_text)
     
     if not detected_specialty:
@@ -46,18 +35,18 @@ def analyze_transcript(transcript_text):
 
     print(f"✅ Medical Intent Detected: Referral to {detected_specialty.capitalize()}")
 
-    # 5. FIND APPROPRIATE DOCTOR from registry
+    # 4. FIND APPROPRIATE DOCTOR from registry
     doctor = select_doctor(detected_specialty)
     print(f"🔍 Specialist Found: {doctor['name']} at {doctor['clinic']}")
     print(f"📍 Location: {doctor['address']}")
     print(f"⭐ Rating: {doctor['rating']}/5.0")
 
-    # 6. CHECK INSURANCE COVERAGE
+    # 5. CHECK INSURANCE COVERAGE
     insurance_result = check_insurance_coverage(detected_specialty)
     print(f"💰 Insurance Status: {insurance_result['status']} ({insurance_result['plan']})")
     print(f"💵 Patient Copay: {insurance_result['copay']}")
 
-    # 7. GET RELEVANT MEDICAL CODES with robust fallbacks
+    # 6. GET RELEVANT MEDICAL CODES with robust fallbacks
     procedure_codes = get_procedure_codes(detected_specialty)
     diagnosis_codes = get_diagnosis_codes(detected_specialty)
     
@@ -65,7 +54,7 @@ def analyze_transcript(transcript_text):
     print(f"🔬 Procedure Codes Retrieved: {len(procedure_codes) if procedure_codes else 0} codes")
     print(f"🧬 Diagnosis Codes Retrieved: {len(diagnosis_codes) if diagnosis_codes else 0} codes")
     
-    # 8. GENERATE COMPREHENSIVE PDF REFERRAL FORM
+    # 7. GENERATE PDF REFERRAL LETTER
     pdf_filename = create_referral_pdf(
         patient_name=patient_name,
         doctor=doctor,
@@ -73,14 +62,10 @@ def analyze_transcript(transcript_text):
         clinical_context=clinical_context,
         procedure_codes=procedure_codes,
         diagnosis_codes=diagnosis_codes,
-        specialty=detected_specialty,
-        patient_dob=patient_dob,
-        patient_age=patient_age,
-        patient_sex=patient_sex,
-        patient_complaint=patient_complaint
+        specialty=detected_specialty
     )
     
-    # 9. GENERATE PROFESSIONAL HTML EMAIL
+    # 8. GENERATE PROFESSIONAL HTML EMAIL
     email_html = generate_referral_email_html(
         patient_name=patient_name,
         doctor=doctor,
@@ -89,11 +74,7 @@ def analyze_transcript(transcript_text):
         procedure_codes=procedure_codes,
         diagnosis_codes=diagnosis_codes,
         specialty=detected_specialty,
-        pdf_filename=pdf_filename,
-        patient_dob=patient_dob,
-        patient_age=patient_age,
-        patient_sex=patient_sex,
-        patient_complaint=patient_complaint
+        pdf_filename=pdf_filename
     )
     
     # 9. PREPARE SIMPLIFIED PAYLOAD - Smart Backend, Dumb Pipe Architecture
@@ -109,35 +90,26 @@ def analyze_transcript(transcript_text):
 
 def extract_patient_name(text):
     """Extract patient name from transcript using regex patterns"""
-    # Pattern 1: "refer [Name]" or "send [Name]"
-    pattern1 = r"(?:refer|send)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+to"
+    # Pattern 1: "Patient is [Name]"
+    pattern1 = r"patient\s+is\s+([A-Za-z\s]+?)(?:\.|,|$)"
     match1 = re.search(pattern1, text, re.IGNORECASE)
     
-    # Pattern 2: "Patient is [Name]"
-    pattern2 = r"patient\s+is\s+([A-Za-z\s]+?)(?:\.|,|\s+is|\s+has)"
-    match2 = re.search(pattern2, text, re.IGNORECASE)
+    # Pattern 2: "for [Name]" or "[Name] needs"
+    pattern2 = r"(?:for|patient)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"
+    match2 = re.search(pattern2, text)
     
-    # Pattern 3: "[Name] is a" or "[Name] has been"
-    pattern3 = r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:is\s+a|has\s+been|reports)"
-    match3 = re.search(pattern3, text)
-    
-    # Pattern 4: Direct name mention with context
-    pattern4 = r"([A-Z][a-z]+\s+[A-Z][a-z]+)"
-    match4 = re.search(pattern4, text)
+    # Pattern 3: Direct name mention at start
+    pattern3 = r"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"
+    match3 = re.search(pattern3, text.strip())
     
     if match1:
-        return match1.group(1).strip()
+        return match1.group(1).strip().title()
     elif match2:
-        return match2.group(1).strip().title()
+        return match2.group(1).strip()
     elif match3:
         name = match3.group(1).strip()
         # Avoid common words that aren't names
-        if name.lower() not in ['okay', 'well', 'so', 'the', 'this', 'please', 'refer', 'patient']:
-            return name
-    elif match4:  
-        name = match4.group(1).strip()
-        # Check if it looks like a real name (First Last format)
-        if len(name.split()) == 2 and all(word.istitle() for word in name.split()):
+        if name.lower() not in ['okay', 'well', 'so', 'the', 'this', 'please', 'refer']:
             return name
     
     return "Walk-In Patient"
@@ -272,7 +244,7 @@ def get_diagnosis_codes(specialty):
     """Get relevant ICD-10 diagnosis codes for the specialty with default fallback"""
     return DIAGNOSIS_CODES.get(specialty, DIAGNOSIS_CODES.get("default", []))
 
-def generate_referral_email_html(patient_name, doctor, insurance_result, clinical_context, procedure_codes, diagnosis_codes, specialty, pdf_filename=None, patient_dob=None, patient_age=None, patient_sex=None, patient_complaint=None):
+def generate_referral_email_html(patient_name, doctor, insurance_result, clinical_context, procedure_codes, diagnosis_codes, specialty, pdf_filename=None):
     """Generate professional HTML referral email - Smart Backend Implementation"""
     # AI-generated code section begins - GitHub Copilot assisted with professional medical referral HTML generation
     
@@ -361,19 +333,10 @@ def generate_referral_email_html(patient_name, doctor, insurance_result, clinica
                         <span class="label">Patient Name:</span> {patient_name}
                     </div>
                     <div class="info-item">
-                        <span class="label">Date of Birth:</span> {patient_dob or 'Not provided'}
-                    </div>
-                    <div class="info-item">
                         <span class="label">Insurance Plan:</span> {insurance_result['plan']}
                     </div>
                 </div>
                 <div>
-                    <div class="info-item">
-                        <span class="label">Age:</span> {patient_age or 'Not provided'}
-                    </div>
-                    <div class="info-item">
-                        <span class="label">Sex:</span> {patient_sex or 'Not provided'}
-                    </div>
                     <div class="info-item">
                         <span class="label">Network Status:</span> 
                         <span class="network-status">{insurance_result['status']}</span>
@@ -383,8 +346,6 @@ def generate_referral_email_html(patient_name, doctor, insurance_result, clinica
                     </div>
                 </div>
             </div>
-            
-            {f'<div class="info-item" style="margin-top: 15px;"><span class="label">Chief Complaint:</span> <strong>{patient_complaint}</strong></div>' if patient_complaint else ''}
         </div>
 
         <div class="section">
@@ -492,130 +453,4 @@ if __name__ == "__main__":
     print("   - 'Patient has headaches, refer to neurology'") 
     print("   - 'The weather is nice today' (should fail)")
     
-# AI-generated code section ends
-
-# AI-generated code section begins - GitHub Copilot assisted with patient data extraction functions
-
-def extract_patient_dob(text):
-    """Extract patient date of birth from transcript"""
-    # Pattern 1: "DOB is MM/DD/YYYY" or "date of birth MM/DD/YYYY"
-    pattern1 = r"(?:dob|date of birth)(?:\s+is)?\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})"
-    match1 = re.search(pattern1, text, re.IGNORECASE)
-    
-    # Pattern 2: "born on MM/DD/YYYY" or "born MM/DD/YYYY"
-    pattern2 = r"born(?:\s+on)?\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})"
-    match2 = re.search(pattern2, text, re.IGNORECASE)
-    
-    # Pattern 3: Standalone date pattern
-    pattern3 = r"\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b"
-    match3 = re.search(pattern3, text)
-    
-    if match1:
-        return match1.group(1)
-    elif match2:
-        return match2.group(1)
-    elif match3:
-        # Only use standalone date if context suggests it's DOB
-        if any(word in text.lower() for word in ['birth', 'age', 'old', 'years']):
-            return match3.group(1)
-    
-    return None
-
-def extract_patient_age(text):
-    """Extract patient age from transcript"""
-    # Pattern 1: "XX year old" or "XX years old"
-    pattern1 = r"(?:is\s+a\s+)?(\d{1,3})\s+years?\s+old"
-    match1 = re.search(pattern1, text, re.IGNORECASE)
-    
-    # Pattern 2: "age is XX" or "age XX"
-    pattern2 = r"age(?:\s+is)?\s+(\d{1,3})"
-    match2 = re.search(pattern2, text, re.IGNORECASE)
-    
-    # Pattern 3: "XXyo" (year old abbreviation)
-    pattern3 = r"(\d{1,3})\s*yo\b"
-    match3 = re.search(pattern3, text, re.IGNORECASE)
-    
-    if match1:
-        age = int(match1.group(1))
-        if 0 <= age <= 120:  # Reasonable age range
-            return str(age)
-    elif match2:
-        age = int(match2.group(1))
-        if 0 <= age <= 120:
-            return str(age)
-    elif match3:
-        age = int(match3.group(1))
-        if 0 <= age <= 120:
-            return str(age)
-    
-    return None
-
-def extract_patient_sex(text):
-    """Extract patient sex/gender from transcript"""
-    text_lower = text.lower()
-    
-    # Look for explicit mentions
-    male_indicators = ['male', 'he is', 'his', 'him', 'man', 'gentleman', 'mr.']
-    female_indicators = ['female', 'she is', 'her', 'woman', 'lady', 'ms.', 'mrs.']
-    
-    male_count = sum(1 for indicator in male_indicators if indicator in text_lower)
-    female_count = sum(1 for indicator in female_indicators if indicator in text_lower)
-    
-    if male_count > female_count and male_count > 0:
-        return "Male"
-    elif female_count > male_count and female_count > 0:
-        return "Female"
-    
-    # Look for specific patterns
-    if re.search(r'\bgender\s+(?:is\s+)?(?:male|m)\b', text_lower):
-        return "Male"
-    elif re.search(r'\bgender\s+(?:is\s+)?(?:female|f)\b', text_lower):
-        return "Female"
-    elif re.search(r'\bsex\s+(?:is\s+)?(?:male|m)\b', text_lower):
-        return "Male"
-    elif re.search(r'\bsex\s+(?:is\s+)?(?:female|f)\b', text_lower):
-        return "Female"
-    
-    return None
-
-def extract_patient_complaint(text):
-    """Extract patient's main complaint from transcript"""
-    # Enhanced complaint extraction patterns
-    complaint_patterns = [
-        r'complaining\s+(?:of\s+)?([^.!?]+)',
-        r'chief\s+complaint\s+(?:is\s+)?([^.!?]+)',
-        r'presenting\s+with\s+([^.!?]+)',
-        r'has\s+been\s+experiencing\s+([^.!?]+)',
-        r'reports\s+([^.!?]+)',
-        r'suffering\s+from\s+([^.!?]+)',
-        r'problem\s+(?:is\s+)?([^.!?]+)',
-        r'concern\s+(?:is\s+)?([^.!?]+)'
-    ]
-    
-    for pattern in complaint_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            complaint = match.group(1).strip()
-            # Clean up the complaint text
-            if len(complaint) > 10 and len(complaint) < 200:
-                return complaint
-    
-    # Fallback to symptom keywords
-    symptom_keywords = [
-        'pain', 'swelling', 'headache', 'chest pain', 'shortness of breath',
-        'rash', 'lesion', 'joint pain', 'back pain', 'dizziness',
-        'nausea', 'fever', 'fatigue', 'anxiety', 'depression'
-    ]
-    
-    text_lower = text.lower()
-    found_symptoms = []
-    for symptom in symptom_keywords:
-        if symptom in text_lower:
-            found_symptoms.append(symptom)
-    
-    if found_symptoms:
-        return ", ".join(found_symptoms[:3])  # Return up to 3 symptoms
-    
-    return None
-
 # AI-generated code section ends

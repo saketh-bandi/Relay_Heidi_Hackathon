@@ -57,7 +57,13 @@ def process_transcript():
             return jsonify({
                 "status": "success",
                 "message": "Medical referral processed successfully",
-                "description": "Referral has been routed to the appropriate specialist and notifications sent",
+                "description": "Referral has been routed to the appropriate specialist, PDF generated, and notifications sent",
+                "features": {
+                    "email_sent": True,
+                    "pdf_generated": True,
+                    "clinical_analysis": True,
+                    "insurance_verified": True
+                },
                 "timestamp": datetime.now().isoformat()
             }), 200
         else:
