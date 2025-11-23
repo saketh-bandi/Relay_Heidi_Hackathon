@@ -690,6 +690,9 @@ $oemr_ui = new OemrUI($arrOeUiSettings);
             <?php } // end prw
             ?>
 
+            // Load Heidi Scribe Sessions fragment
+            placeHtml("heidi_sessions_fragment.php", "heidi_sessions_ps_expand", false, true);
+
             <?php
             // Initialize for each applicable LBF form.
             $gfres = sqlStatement("SELECT grp_form_id
@@ -1389,6 +1392,26 @@ $oemr_ui = new OemrUI($arrOeUiSettings);
                             echo $twig->getTwig()->render('patient/card/loader.html.twig', $viewArgs);
                         }
                     endif; //end if prw is activated
+
+                    // Heidi Health Scribe Sessions widget
+                    $dispatchResult = $ed->dispatch(new CardRenderEvent('heidi_sessions'), CardRenderEvent::EVENT_HANDLE);
+                    $id = "heidi_sessions_ps_expand";
+                    $viewArgs = [
+                        'title' => xl('Heidi Scribe Sessions'),
+                        'id' => $id,
+                        'initiallyCollapsed' => (getUserSetting($id) == 0) ? true : false,
+                        'btnLabel' => 'Edit',
+                        'btnLink' => '#',
+                        'linkMethod' => 'html',
+                        'bodyClass' => 'notab collapse show',
+                        'auth' => true,
+                        'prependedInjection' => $dispatchResult->getPrependedInjection(),
+                        'appendedInjection' => $dispatchResult->getAppendedInjection(),
+                    ];
+                    if (!in_array('card_heidi_sessions', $hiddenCards)) {
+                        echo $twig->getTwig()->render('patient/card/loader.html.twig', $viewArgs);
+                    }
+                    // end Heidi Scribe Sessions
 
                     if (AclMain::aclCheckCore('patients', 'disclosure')) :
                         $authWriteDisclosure = AclMain::aclCheckCore('patients', 'disclosure', '', 'write');
