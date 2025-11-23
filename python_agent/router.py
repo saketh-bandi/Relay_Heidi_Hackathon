@@ -9,12 +9,82 @@ from datetime import datetime
 from mock_db import SPECIALIST_REGISTRY, INSURANCE_PLANS, PROCEDURE_CODES, DIAGNOSIS_CODES, PATIENTS, DEMO_SCENARIOS, PA_RULES, PA_STATUS_CODES
 from pdf_generator import create_referral_pdf
 
-# AI-generated code section begins - GitHub Copilot assisted with creating comprehensive medical transcript analysis
 # ==========================================
 # CONFIGURATION
 # ==========================================
 # PASTE YOUR N8N URL HERE (Make sure it's the PRODUCTION URL)
 N8N_WEBHOOK_URL = "https://bandisaketh.app.n8n.cloud/webhook/d0e00876-000c-4117-a223-4197c37b9611"
+
+# Anthropic Claude API Configuration
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
+
+# AI-generated code section ends
+
+def get_claude_clinical_insight(patient_profile, detected_specialty):
+    """
+    Get clinical note from Claude API for referral reasoning
+    """
+    # AI-generated code section begins - GitHub Copilot assisted with Claude API integration
+    
+    # Extract patient data from profile
+    patient_history = patient_profile.get('history', [])
+    patient_complaint = patient_profile.get('chief_complaint', 'Not specified')
+    
+    # Prepare patient history string
+    history_str = ", ".join(patient_history) if isinstance(patient_history, list) else str(patient_history)
+    
+    # Construct the refined prompt for Claude - simplified clinical reasoning
+    prompt = f"""Analyze the patient's Medical History, Chief Complaint, and the Requested Specialty. Provide a structured clinical assessment using short, clear sentences. Focus ONLY on justification, risk, and urgency.
+
+Example Output Format: Final Assessment: Referral justified; symptoms consistent with need for orthopedic surgical evaluation. Risk Flags: High comorbidity risk (Sleep Apnea, Chronic Back Pain). Urgency: Prompt evaluation required to prevent functional decline.
+
+Patient History: {history_str}
+Chief Complaint: {patient_complaint}
+Requested Specialty: {detected_specialty}
+
+Your Note:"""
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+    }
+    
+    payload = {
+        "model": "claude-3-haiku-20240307",
+        "max_tokens": 200,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    }
+    
+    try:
+        response = requests.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            clinical_insight = result.get("content", [{}])[0].get("text", "")
+            return clinical_insight.strip()
+        else:
+            print(f"⚠️ Claude API Error: {response.status_code} - {response.text}")
+            # Fallback to original predictive alert system
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Claude API Request Failed: {str(e)}")
+        # Fallback to original predictive alert system
+        return None
+    except Exception as e:
+        print(f"⚠️ Claude API Unexpected Error: {str(e)}")
+        return None
+    
+    # AI-generated code section ends
+
+# AI-generated code section begins - GitHub Copilot assisted with creating comprehensive medical transcript analysis
 
 def get_patient_from_database(patient_name):
     """Get complete patient information from enhanced database"""
@@ -204,16 +274,7 @@ def analyze_transcript(transcript_text):
     clinical_context = extract_clinical_context(transcript_text)
     print(f"📋 Clinical Context: {clinical_context}")
     
-    # 3.5. PREDICTIVE ALERT ANALYSIS - Scan patient history for risk factors
-    predictive_alert = generate_predictive_alerts(patient_data, clinical_context, transcript_text)
-    
-    # DIAGNOSTIC PRINT STATEMENT - Confirm predictive logic works
-    print("--- DIAGNOSTIC PREDICTIVE ALERT ---")
-    print("Patient History Scanned for Triggers.")
-    print(f"Predictive Alert Status: {predictive_alert}")
-    print("--- END DIAGNOSTIC ---")
-    
-    # 4. DETECT SPECIALTY dynamically from registry keys
+    # 4. DETECT SPECIALTY dynamically from registry keys (moved up for Claude API)
     detected_specialty = detect_specialty(transcript_text)
     
     if not detected_specialty:
@@ -221,6 +282,29 @@ def analyze_transcript(transcript_text):
         return False
 
     print(f"✅ Medical Intent Detected: Referral to {detected_specialty.capitalize()}")
+    
+    # 3.5. CLINICAL NOTE ANALYSIS - Use Claude AI for clinical insights
+    # Prepare patient profile for Claude API
+    patient_profile = {
+        'history': patient_data.get('medical_history', []) if patient_data else [],
+        'chief_complaint': patient_complaint or 'Not specified'
+    }
+    
+    clinical_triage_note = get_claude_clinical_insight(patient_profile, detected_specialty)
+    
+    # Fallback to original system if Claude fails
+    if not clinical_triage_note:
+        print("⚠️ Claude API unavailable - using fallback predictive system")
+        clinical_triage_note = generate_predictive_alerts(patient_data, clinical_context, transcript_text)
+    
+    # DIAGNOSTIC PRINT STATEMENT - Confirm clinical note generation
+    print("--- CLINICAL NOTE ---")
+    print("Clinical Reasoning & Risk Assessment:")
+    print(f"Patient History: {patient_profile['history']}")
+    print(f"Chief Complaint: {patient_profile['chief_complaint']}")
+    print(f"Requested Specialty: {detected_specialty}")
+    print(f"Note: {clinical_triage_note}")
+    print("--- END CLINICAL NOTE ---")
 
     # 5. FIND APPROPRIATE DOCTOR from registry
     doctor = select_doctor(detected_specialty)

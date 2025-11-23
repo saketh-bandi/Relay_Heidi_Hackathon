@@ -49,7 +49,8 @@ class MedicalReferralFormPDF(FPDF):
     
     def __init__(self):
         super().__init__()
-        self.set_auto_page_break(auto=True, margin=15)
+        # CRITICAL: Disable auto page break to prevent blank pages
+        self.set_auto_page_break(auto=False)
         
     def header(self):
         """PDF Header with medical letterhead styling"""
@@ -225,7 +226,9 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
     # Create PDF instance with error handling
     try:
         pdf = MedicalReferralFormPDF()
+        # CRITICAL: Only add ONE page and set compact margins
         pdf.add_page()
+        pdf.set_margins(8, 8, 8)  # Reduced margins for more space
         
         # Reset text color for body content
         pdf.set_text_color(0, 0, 0)
@@ -239,41 +242,42 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
         current_date = datetime.now().strftime("%m/%d/%Y")
         ref_number = f"REF-{timestamp}"
         
-        # Top row with date and reference
-        pdf.draw_form_box(10, 45, 90, 20, "DATE OF REFERRAL", current_date)
-        pdf.draw_form_box(110, 45, 90, 20, "REFERENCE NUMBER", ref_number)
+        # COMPACT LAYOUT - All content fits on one page
+        # Top row with date and reference (reduced spacing)
+        pdf.draw_form_box(8, 35, 88, 16, "DATE OF REFERRAL", current_date)
+        pdf.draw_form_box(105, 35, 88, 16, "REFERENCE NUMBER", ref_number)
         
-        # PATIENT INFORMATION SECTION (Row 2)
-        pdf.draw_form_box(10, 70, 90, 20, "PATIENT NAME", patient_name or "Not Provided")
-        pdf.draw_form_box(110, 70, 40, 20, "AGE", patient_age or "Not Provided")
-        pdf.draw_form_box(160, 70, 40, 20, "SEX", patient_sex or "Not Provided")
+        # PATIENT INFORMATION SECTION (Row 2) - Compact spacing
+        pdf.draw_form_box(8, 54, 88, 16, "PATIENT NAME", patient_name or "Not Provided")
+        pdf.draw_form_box(105, 54, 40, 16, "AGE", patient_age or "Not Provided")
+        pdf.draw_form_box(150, 54, 43, 16, "SEX", patient_sex or "Not Provided")
         
-        # Row 3 - DOB and additional info
-        pdf.draw_form_box(10, 95, 90, 20, "DATE OF BIRTH", patient_dob or "Not Provided")
-        pdf.draw_form_box(110, 95, 90, 20, "INSURANCE PLAN", insurance_result.get('plan', 'Unknown'))
+        # Row 3 - DOB and insurance (compact)
+        pdf.draw_form_box(8, 73, 88, 16, "DATE OF BIRTH", patient_dob or "Not Provided")
+        pdf.draw_form_box(105, 73, 88, 16, "INSURANCE PLAN", insurance_result.get('plan', 'Unknown'))
         
-        # Row 4 - Network status and copay
+        # Row 4 - Network status and copay (compact)
         network_status = insurance_result.get('status', 'Unknown')
         copay_info = insurance_result.get('copay', 'N/A')
-        pdf.draw_form_box(10, 120, 90, 20, "NETWORK STATUS", network_status)
-        pdf.draw_form_box(110, 120, 90, 20, "ESTIMATED COPAY", copay_info)
+        pdf.draw_form_box(8, 92, 88, 16, "NETWORK STATUS", network_status)
+        pdf.draw_form_box(105, 92, 88, 16, "ESTIMATED COPAY", copay_info)
         
-        # PROVIDER INFORMATION SECTION
-        pdf.draw_form_box(10, 150, 90, 25, "REFERRING TO SPECIALIST", 
+        # PROVIDER INFORMATION SECTION (compact)
+        pdf.draw_form_box(8, 111, 88, 18, "REFERRING TO SPECIALIST", 
                          f"{doctor.get('name', 'Unknown Provider')}")
-        pdf.draw_form_box(110, 150, 90, 25, "SPECIALTY", specialty.title())
+        pdf.draw_form_box(105, 111, 88, 18, "SPECIALTY", specialty.title())
         
-        # Provider details
-        pdf.draw_form_box(10, 180, 60, 20, "NPI NUMBER", doctor.get('npi', 'N/A'))
-        pdf.draw_form_box(80, 180, 120, 20, "CLINIC/PRACTICE", doctor.get('clinic', 'Unknown Clinic'))
+        # Provider details (compact)
+        pdf.draw_form_box(8, 132, 60, 16, "NPI NUMBER", doctor.get('npi', 'N/A'))
+        pdf.draw_form_box(75, 132, 118, 16, "CLINIC/PRACTICE", doctor.get('clinic', 'Unknown Clinic'))
         
-        # CLINICAL INFORMATION SECTION
-        # Major complaint
+        # CLINICAL INFORMATION SECTION (reduced height)
+        # Major complaint (compact)
         major_complaint = patient_complaint or clinical_context or "General consultation requested"
-        pdf.draw_large_text_box(10, 210, 190, 25, "MAJOR COMPLAINT / PRESENTING SYMPTOMS", major_complaint)
+        pdf.draw_large_text_box(8, 151, 185, 20, "MAJOR COMPLAINT / SYMPTOMS", major_complaint)
         
-        # Clinical context/history
-        pdf.draw_large_text_box(10, 240, 190, 30, "CLINICAL CONTEXT / HISTORY", clinical_context or "See complaint section above")
+        # Clinical context (compact)
+        pdf.draw_large_text_box(8, 174, 185, 22, "CLINICAL CONTEXT", clinical_context or "See complaint above")
         
         # MEDICAL CODING SECTION
         # Procedure codes
@@ -287,9 +291,10 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
         else:
             proc_text = "To be determined during consultation"
         
-        pdf.draw_large_text_box(10, 275, 190, 20, "ANTICIPATED CPT CODES", proc_text)
+        # MEDICAL CODING SECTION (compact)
+        pdf.draw_large_text_box(8, 199, 185, 18, "ANTICIPATED CPT CODES", proc_text)
         
-        # Diagnosis codes
+        # Diagnosis codes (compact)
         if diagnosis_codes and len(diagnosis_codes) > 0:
             diag_text = ""
             for i, diag in enumerate(diagnosis_codes[:3]):
@@ -300,12 +305,12 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
         else:
             diag_text = "To be determined after specialist evaluation"
         
-        pdf.draw_large_text_box(10, 300, 190, 20, "POTENTIAL ICD-10 CODES", diag_text)
+        pdf.draw_large_text_box(8, 220, 185, 18, "POTENTIAL ICD-10 CODES", diag_text)
         
-        # AUTHORIZATION SECTION
-        pdf.draw_form_box(10, 325, 60, 20, "URGENCY LEVEL", "Routine")
-        pdf.draw_form_box(80, 325, 60, 20, "AUTHORIZATION", "Pending")
-        pdf.draw_form_box(150, 325, 50, 20, "FOLLOW-UP", "Required")
+        # AUTHORIZATION SECTION (compact)
+        pdf.draw_form_box(8, 241, 60, 16, "URGENCY LEVEL", "Routine")
+        pdf.draw_form_box(75, 241, 60, 16, "AUTHORIZATION", "Pending")
+        pdf.draw_form_box(140, 241, 53, 16, "FOLLOW-UP", "Required")
         
     except Exception as e:
         print(f"❌ Error generating form content: {e}")
@@ -313,22 +318,22 @@ def create_referral_pdf(patient_name, doctor, insurance_result, clinical_context
         pdf.set_font('Arial', '', 12)
         pdf.set_xy(10, 50)
         pdf.safe_cell(0, 10, "Error: Unable to generate form content properly", 0, 1, 'L')
-    # FOOTER SIGNATURE SECTION
+    # FOOTER SIGNATURE SECTION (compact to fit on one page)
     try:
-        # Add signature area at bottom
-        pdf.set_xy(10, 350)
-        pdf.set_font('Arial', 'B', 10)
-        pdf.safe_cell(0, 8, 'AUTHORIZATION & SIGNATURES', 0, 1, 'L')
+        # Add signature area at bottom (compact positioning)
+        pdf.set_xy(8, 260)
+        pdf.set_font('Arial', 'B', 9)
+        pdf.safe_cell(0, 6, 'AUTHORIZATION & SIGNATURES', 0, 1, 'L')
         
-        # Signature boxes
-        pdf.draw_form_box(10, 360, 90, 20, "REFERRING PROVIDER SIGNATURE", "Auto-Generated System")
-        pdf.draw_form_box(110, 360, 90, 20, "DATE SIGNED", current_date)
+        # Signature boxes (compact)
+        pdf.draw_form_box(8, 268, 88, 16, "REFERRING PROVIDER", "Auto-Generated System")
+        pdf.draw_form_box(105, 268, 88, 16, "DATE SIGNED", current_date)
         
-        # System info
-        pdf.set_xy(10, 385)
-        pdf.set_font('Arial', '', 8)
-        pdf.safe_cell(0, 5, 'This referral was automatically generated by Healthcare AI Referral System', 0, 1, 'L')
-        pdf.safe_cell(0, 5, 'Requires physician review and authorization before processing', 0, 1, 'L')
+        # System info (compact)
+        pdf.set_xy(8, 287)
+        pdf.set_font('Arial', '', 7)
+        pdf.safe_cell(0, 4, 'This referral was automatically generated by Healthcare AI Referral System', 0, 1, 'L')
+        pdf.safe_cell(0, 4, 'Requires physician review and authorization before processing', 0, 1, 'L')
         
     except Exception as e:
         print(f"❌ Error in signature section: {e}")
